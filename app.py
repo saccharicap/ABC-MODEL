@@ -1,70 +1,70 @@
-"""Launch locally with: streamlit run app.py"""
-import json
-import pickle
-from pathlib import Path
-
-import pandas as pd
 import streamlit as st
-from schema import FEATURES, validate_features
+import joblib
+import pandas as pd
+import numpy as np
 
-ROOT = Path(__file__).resolve().parent
-st.set_page_config(page_title='ABC Delivery Predictor', page_icon='📦', layout='centered')
+# Load the trained model
+model = joblib.load('delivery_delay.sav')
 
-@st.cache_resource
-def load_model():
-    with (ROOT/'delivery_delay_model.sav').open('rb') as f:
-        model = pickle.load(f)
-    metadata = json.loads((ROOT/'model_metadata.json').read_text())
-    return model, metadata
+st.title('Delivery Delay Prediction App')
+st.write('Enter the features below to predict if a delivery will be delayed.')
 
-try:
-    model, metadata = load_model()
-except FileNotFoundError:
-    st.error('Missing model files. Upload delivery_delay_model.sav and model_metadata.json alongside app.py.')
-    st.stop()
+# Define the input features as they were used in training
+# This order and names must match the X.columns from the training notebook
+feature_order = [
+    'Delivery_Distance',
+    'Traffic_Congestion',
+    'Weather_Condition',
+    'Delivery_Slot',
+    'Driver_Experience',
+    'Num_Stops',
+    'Vehicle_Age',
+    'Road_Condition_Score',
+    'Package_Weight',
+    'Fuel_Efficiency',
+    'Warehouse_Processing_Time'
+]
 
-st.title('ABC Delivery Predictor')
-st.write('Enter the delivery details known before dispatch to estimate the chance of a delay.')
-st.caption('Classroom model. Estimates need validation on future operational deliveries.')
+# Create input widgets for each feature
+# Using reasonable default values and ranges based on the dataset
+delivery_distance = st.number_input('Delivery Distance (km)', min_value=1.0, max_value=50.0, value=25.0, step=0.1)
+traffic_congestion = st.slider('Traffic Congestion (1=Low, 5=High)', min_value=1, max_value=5, value=3)
+weather_condition = st.slider('Weather Condition (1=Good, 3=Bad)', min_value=1, max_value=3, value=2)
+delivery_slot = st.slider('Delivery Slot (1=Morning, 2=Afternoon, 3=Evening)', min_value=1, max_value=3, value=2)
+driver_experience = st.number_input('Driver Experience (years)', min_value=0, max_value=20, value=5)
+num_stops = st.number_input('Number of Stops', min_value=1, max_value=10, value=3)
+vehicle_age = st.number_input('Vehicle Age (years)', min_value=0, max_value=15, value=5)
+road_condition_score = st.slider('Road Condition Score (1=Poor, 5=Excellent)', min_value=1, max_value=5, value=3)
+package_weight = st.number_input('Package Weight (kg)', min_value=0.1, max_value=50.0, value=5.0, step=0.1)
+fuel_efficiency = st.number_input('Fuel Efficiency (km/l)', min_value=5.0, max_value=25.0, value=15.0, step=0.1)
+warehouse_processing_time = st.number_input('Warehouse Processing Time (minutes)', min_value=10, max_value=100, value=45)
 
-with st.form('delivery_form'):
-    left, right = st.columns(2)
-    with left:
-        distance = st.number_input('Delivery distance (km)', min_value=0.0, value=19.35, step=0.1)
-        traffic = st.selectbox('Traffic congestion', [1,2,3,4,5], index=3,
-                               format_func=lambda v: f'{v}'+(' - low' if v==1 else ' - high' if v==5 else ''))
-        weather = st.selectbox('Weather', [1,2,3], index=2,
-                               format_func=lambda v: {1:'Clear',2:'Rainy',3:'Stormy'}[v])
-        slot = st.selectbox('Delivery slot', [1,2,3], index=1,
-                            format_func=lambda v: {1:'Morning',2:'Afternoon',3:'Evening'}[v])
-        experience = st.number_input('Driver experience (years)', min_value=0.0, value=16.0, step=1.0)
-        stops = st.number_input('Stops before final delivery', min_value=0, value=6, step=1)
-    with right:
-        age = st.number_input('Vehicle age (years)', min_value=0.0, value=9.0, step=1.0)
-        road = st.selectbox('Road quality', [1,2,3,4,5], index=2,
-                            format_func=lambda v: f'{v}'+(' - poor' if v==1 else ' - excellent' if v==5 else ''))
-        weight = st.number_input('Package weight (kg)', min_value=0.0, value=33.62, step=0.1)
-        fuel = st.number_input('Fuel efficiency (km/l)', min_value=0.1, value=13.02, step=0.1)
-        warehouse = st.number_input('Warehouse processing time (minutes)', min_value=0.0, value=58.0, step=1.0)
-    submitted = st.form_submit_button('Predict delivery', type='primary')
+# Create a dictionary of input features
+input_data = {
+    'Delivery_Distance': delivery_distance,
+    'Traffic_Congestion': traffic_congestion,
+    'Weather_Condition': weather_condition,
+    'Delivery_Slot': delivery_slot,
+    'Driver_Experience': driver_experience,
+    'Num_Stops': num_stops,
+    'Vehicle_Age': vehicle_age,
+    'Road_Condition_Score': road_condition_score,
+    'Package_Weight': package_weight,
+    'Fuel_Efficiency': fuel_efficiency,
+    'Warehouse_Processing_Time': warehouse_processing_time
+}
 
-if submitted:
-    row = dict(zip(FEATURES, [distance,traffic,weather,slot,experience,stops,age,road,weight,fuel,warehouse]))
-    x = validate_features(pd.DataFrame([row]))
-    probability = float(model.predict_proba(x)[0,1])
-    st.metric('Estimated probability of delay', f'{probability:.1%}')
-    if probability >= 0.5:
-        st.warning('Predicted: delayed. Review this delivery before dispatch.')
+# Create a button for prediction
+if st.button('Predict Delivery Delay'):
+    # Convert input data to a Pandas DataFrame, ensuring the order of columns
+    features_df = pd.DataFrame([input_data], columns=feature_order)
+    
+    # Make prediction
+    prediction = model.predict(features_df)
+    prediction_proba = model.predict_proba(features_df)
+    
+    # Display the prediction
+    if prediction[0] == 1:
+        st.error(f'Prediction: Delayed (Probability: {prediction_proba[0][1]*100:.2f}%)')
     else:
-        st.success('Predicted: on time.')
-    st.caption('A probability of 50% or higher is classified as delayed. This is an estimate, not a guarantee.')
-    outside = [c.replace('_',' ') for c,v in row.items()
-               if not metadata['training_ranges'][c]['min'] <= v <= metadata['training_ranges'][c]['max']]
-    if outside:
-        st.info('Outside the training data range: '+', '.join(outside)+'. Interpret this estimate cautiously.')
-
-with st.expander('How the model works'):
-    st.write('Gradient boosting combines 100 small decision trees to predict delayed (1) or on time (0).')
-    st.write('Models were compared using five-fold cross-validation on 800 training deliveries. The selected model correctly classified all 200 held-out test deliveries in this teaching dataset.')
-    st.write('Warehouse processing time and vehicle age were the strongest predictors. Predictive importance does not establish a root cause.')
-    st.write('The app loads the trained model. It does not retrain when you enter new values.')
+        st.success(f'Prediction: Not Delayed (Probability: {prediction_proba[0][0]*100:.2f}%)')
